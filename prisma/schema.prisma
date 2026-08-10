@@ -1,0 +1,149 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id          String   @id @default(uuid())
+  discordId   String   @unique
+  username    String
+  teamId      String?
+  role        String   @default("PLAYER") // PLAYER, CAPTAIN, ADMIN
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  team        Team?    @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  submissions MatchResultSubmission[] @relation("UserSubmissions")
+  reviews     MatchResultSubmission[] @relation("AdminReviews")
+}
+
+model Team {
+  id            String   @id @default(uuid())
+  name          String
+  tag           String   @unique
+  logoUrl       String?
+  points        Int      @default(0)
+  wins          Int      @default(0)
+  losses        Int      @default(0)
+  matchesPlayed Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  members       User[]
+  matchesAsA    Match[]  @relation("TeamAMatches")
+  matchesAsB    Match[]  @relation("TeamBMatches")
+  wonMatches    Match[]  @relation("WonMatches")
+  groupTeams    GroupTeam[]
+}
+
+model Tournament {
+  id        String   @id @default(uuid())
+  name      String
+  season    String
+  status    String   @default("ACTIVE") // UPCOMING, ACTIVE, COMPLETED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stages    Stage[]
+  matches   Match[]
+}
+
+model Stage {
+  id           String   @id @default(uuid())
+  tournamentId String
+  name         String   // Group Stage, Playoffs, Finals
+  order        Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  groups       Group[]
+  matches      Match[]
+}
+
+model Group {
+  id        String   @id @default(uuid())
+  stageId   String
+  name      String   // Group A, Group B
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stage     Stage    @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  matches   Match[]
+  teams     GroupTeam[]
+}
+
+model GroupTeam {
+  id        String   @id @default(uuid())
+  groupId   String
+  teamId    String
+  createdAt DateTime @default(now())
+
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, teamId])
+}
+
+model Match {
+  id           String    @id @default(uuid())
+  tournamentId String
+  stageId      String
+  groupId      String?
+  channelId    String?   @unique // Discord text channel ID dedicated to this match
+  team1Id      String
+  team2Id      String
+  format       String    @default("BO1") // BO1, BO3
+  round        Int       @default(1) // Round 1 (Day 1), Round 2 (Day 2), Round 3 (Day 3)
+  status       String    @default("SCHEDULED") // SCHEDULED, PENDING_APPROVAL, FINISHED, CANCELLED
+  scheduledAt  DateTime  @default(now())
+  finishedAt   DateTime?
+  winnerTeamId String?
+  scoreTeam1   Int       @default(0)
+  scoreTeam2   Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  stage        Stage      @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  group        Group?     @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  team1        Team       @relation("TeamAMatches", fields: [team1Id], references: [id], onDelete: Cascade)
+  team2        Team       @relation("TeamBMatches", fields: [team2Id], references: [id], onDelete: Cascade)
+  winner       Team?      @relation("WonMatches", fields: [winnerTeamId], references: [id], onDelete: SetNull)
+
+  submissions  MatchResultSubmission[]
+}
+
+model MatchResultSubmission {
+  id              String   @id @default(uuid())
+  matchId         String
+  submittedBy     String?  // Discord User ID or User ID
+  sourceChannelId String   // Discord Channel ID where result was submitted from
+  winnerTeamId    String
+  scoreTeam1      Int
+  scoreTeam2      Int
+  status          String   @default("PENDING") // PENDING, APPROVED, REJECTED, CANCELLED
+  rejectionReason String?
+  reviewedBy      String?  // Admin User ID / Discord ID
+  submittedAt     DateTime @default(now())
+  reviewedAt      DateTime?
+
+  match           Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  submitter       User?    @relation("UserSubmissions", fields: [submittedBy], references: [discordId], onDelete: SetNull)
+  reviewer        User?    @relation("AdminReviews", fields: [reviewedBy], references: [discordId], onDelete: SetNull)
+
+  mapLinks        MatchResultMap[]
+}
+
+model MatchResultMap {
+  id           String   @id @default(uuid())
+  submissionId String
+  mapNumber    Int
+  url          String
+
+  submission   MatchResultSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+}
