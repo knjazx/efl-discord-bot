@@ -188,7 +188,11 @@ export class MatchService {
     const createdMatches: any[] = [];
 
     for (const grp of groups) {
-      const teams = grp.teams.map(gt => gt.team);
+      // Sort teams deterministically by name to ensure stable indices across all round generations
+      const teams = grp.teams
+        .map(gt => gt.team)
+        .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+
       if (teams.length < 2) continue;
 
       let roundPairs = generateRoundRobinPairs(teams);
