@@ -6,6 +6,7 @@ import {
   Interaction,
   Events,
 } from 'discord.js';
+import http from 'http';
 import { config } from './config';
 import { logger } from './utils/logger';
 
@@ -25,6 +26,15 @@ import { handleRejectReasonModal } from './interactions/modals/rejectReasonModal
 import { handleBulkAddTeamsModal } from './interactions/modals/bulkAddTeamsModal';
 import { handleSelectMatch } from './interactions/selectMenus/selectMatch';
 import { handleSelectWinner } from './interactions/selectMenus/selectWinner';
+
+// HTTP Health Check Server for Render / Cloud hostings
+const port = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('EFL Discord Bot is online and healthy!\n');
+}).listen(port, () => {
+  logger.info(`HTTP health check server listening on port ${port}`);
+});
 
 export const client = new Client({
   intents: [
