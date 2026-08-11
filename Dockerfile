@@ -24,5 +24,5 @@ COPY . .
 RUN npx prisma generate
 RUN npm run build
 
-# Start production server
-CMD ["node", "dist/index.js"]
+# Ensure database tables exist before starting production server
+CMD ["sh", "-c", "npx prisma db push && node dist/index.js"]

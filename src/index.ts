@@ -154,10 +154,19 @@ client.on(Events.InteractionCreate, async (interaction: Interaction) => {
   }
 });
 
+import { execSync } from 'child_process';
+
 async function main() {
   if (!config.DISCORD_TOKEN || config.DISCORD_TOKEN === 'MOCK_DISCORD_TOKEN') {
     logger.warn('DISCORD_TOKEN is set to MOCK_DISCORD_TOKEN. Provide real token in .env to connect to live Discord API.');
     return;
+  }
+
+  try {
+    logger.info('Ensuring Prisma database schema is initialized...');
+    execSync('npx prisma db push --skip-generate', { stdio: 'ignore' });
+  } catch (dbErr) {
+    logger.warn('Prisma db push check handled.');
   }
 
   await client.login(config.DISCORD_TOKEN);
