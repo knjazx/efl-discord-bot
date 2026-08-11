@@ -13,6 +13,24 @@ export function sanitizeChannelName(name: string): string {
 export function generateRoundRobinPairs(teams: any[]): { t1: any; t2: any; round: number }[] {
   if (teams.length < 2) return [];
 
+  // Optimized canonical schedule for standard 4-team CS2 group stage
+  if (teams.length === 4) {
+    return [
+      // Round 1 (Day 1)
+      { t1: teams[0], t2: teams[1], round: 1 },
+      { t1: teams[2], t2: teams[3], round: 1 },
+
+      // Round 2 (Day 2)
+      { t1: teams[0], t2: teams[2], round: 2 },
+      { t1: teams[1], t2: teams[3], round: 2 },
+
+      // Round 3 (Day 3)
+      { t1: teams[0], t2: teams[3], round: 3 },
+      { t1: teams[1], t2: teams[2], round: 3 },
+    ];
+  }
+
+  // General Berger / Circle algorithm for arbitrary team counts (5, 6, 8, etc.)
   const list: (any | null)[] = [...teams];
   if (list.length % 2 !== 0) {
     list.push(null); // Dummy team for odd team count
