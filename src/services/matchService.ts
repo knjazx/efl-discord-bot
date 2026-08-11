@@ -1,71 +1,50 @@
 import { prisma } from '../database/prisma';
 import { logger } from '../utils/logger';
 
-function sanitizeChannelName(name: string): string {
-  let cleaned = name.toLowerCase().replace(/[^a-z0-9-_]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-  if (!cleaned) cleaned = 'team';
-  return cleaned;
+export function sanitizeChannelName(name: string): string {
+  let clean = name.toLowerCase();
+  clean = clean.replace(/[^a-z0-9-_]/g, '-');
+  clean = clean.replace(/-+/g, '-');
+  clean = clean.replace(/^-|-$/g, '');
+  if (!clean) clean = 'match-channel';
+  return clean.slice(0, 95);
+}
+
+export function generateRoundRobinPairs(teams: any[]): { t1: any; t2: any; round: number }[] {
+  if (teams.length < 2) return [];
+
+  const list: (any | null)[] = [...teams];
+  if (list.length % 2 !== 0) {
+    list.push(null); // Dummy team for odd team count
+  }
+
+  const numTeams = list.length;
+  const numRounds = numTeams - 1;
+  const half = numTeams / 2;
+  const pairs: { t1: any; t2: any; round: number }[] = [];
+
+  for (let r = 0; r < numRounds; r++) {
+    for (let i = 0; i < half; i++) {
+      const t1 = list[i];
+      const t2 = list[numTeams - 1 - i];
+
+      if (t1 && t2) {
+        pairs.push({
+          t1,
+          t2,
+          round: r + 1,
+        });
+      }
+    }
+
+    // Rotate teams array for next round: keep list[0] fixed, move list[numTeams - 1] to index 1
+    list.splice(1, 0, list.pop()!);
+  }
+
+  return pairs;
 }
 
 export class MatchService {
-  public static async getMatchById(matchId: string) {
-    return prisma.match.findUnique({
-      where: { id: matchId },
-      include: {
-        tournament: true,
-        stage: true,
-        group: true,
-        team1: { include: { members: true } },
-        team2: { include: { members: true } },
-        submissions: {
-          orderBy: { submittedAt: 'desc' },
-        },
-      },
-    });
-  }
-
-  public static async getMatchByChannelId(channelId: string) {
-    return prisma.match.findUnique({
-      where: { channelId },
-      include: {
-        tournament: true,
-        stage: true,
-        group: true,
-        team1: { include: { members: true } },
-        team2: { include: { members: true } },
-        submissions: {
-          orderBy: { submittedAt: 'desc' },
-        },
-      },
-    });
-  }
-
-  public static async getAvailableMatchesForUser(discordId: string) {
-    const user = await prisma.user.findUnique({
-      where: { discordId },
-      include: { team: true },
-    });
-
-    const userTeamId = user?.teamId;
-
-    return prisma.match.findMany({
-      where: {
-        status: { in: ['SCHEDULED', 'PENDING_APPROVAL'] },
-        OR: userTeamId
-          ? [{ team1Id: userTeamId }, { team2Id: userTeamId }]
-          : undefined,
-      },
-      include: {
-        tournament: true,
-        stage: true,
-        group: true,
-        team1: true,
-        team2: true,
-      },
-      orderBy: { scheduledAt: 'asc' },
-    });
-  }
-
   public static async createMatch(data: {
     tournamentId: string;
     stageId: string;
@@ -76,7 +55,6 @@ export class MatchService {
     format: string;
     round?: number;
   }) {
-    logger.info(`Creating match (Round ${data.round || 1}) between team ${data.team1Id} and ${data.team2Id} (${data.format})`);
     return prisma.match.create({
       data: {
         tournamentId: data.tournamentId,
@@ -99,6 +77,69 @@ export class MatchService {
     });
   }
 
+  public static async getMatchById(matchId: string) {
+    return prisma.match.findUnique({
+      where: { id: matchId },
+      include: {
+        tournament: true,
+        stage: true,
+        group: true,
+        team1: { include: { members: true } },
+        team2: { include: { members: true } },
+      },
+    });
+  }
+
+  public static async getMatchByChannelId(channelId: string) {
+    return prisma.match.findFirst({
+      where: { channelId },
+      include: {
+        tournament: true,
+        stage: true,
+        group: true,
+        team1: { include: { members: true } },
+        team2: { include: { members: true } },
+      },
+    });
+  }
+
+  public static async getAvailableMatchesForUser(discordUserId: string, isMatchAdmin: boolean = false) {
+    const { TournamentService } = await import('./tournamentService');
+    const tournament = await TournamentService.getOrCreateDefaultTournament();
+    const stage = tournament.stages[0];
+
+    const scheduledMatches = await prisma.match.findMany({
+      where: {
+        stageId: stage.id,
+        status: 'SCHEDULED',
+      },
+      include: {
+        group: true,
+        stage: true,
+        team1: { include: { members: true } },
+        team2: { include: { members: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (isMatchAdmin) {
+      return scheduledMatches;
+    }
+
+    const filtered = scheduledMatches.filter(m => {
+      const isTeam1Member = m.team1.members.some(mem => mem.discordId === discordUserId);
+      const isTeam2Member = m.team2.members.some(mem => mem.discordId === discordUserId);
+      return isTeam1Member || isTeam2Member;
+    });
+
+    // Fallback if not linked directly to user ID: return all scheduled matches
+    if (filtered.length === 0 && scheduledMatches.length > 0) {
+      return scheduledMatches;
+    }
+
+    return filtered;
+  }
+
   public static async generateRoundRobinMatches(
     format: string = 'BO1',
     createDiscordChannels: boolean = false,
@@ -107,7 +148,6 @@ export class MatchService {
   ) {
     const { TournamentService } = await import('./tournamentService');
     const { GroupService } = await import('./groupService');
-    const { createMatchCardEmbed } = await import('../utils/embeds');
 
     const tournament = await TournamentService.getOrCreateDefaultTournament();
     const stage = tournament.stages[0];
@@ -133,64 +173,36 @@ export class MatchService {
       const teams = grp.teams.map(gt => gt.team);
       if (teams.length < 2) continue;
 
-      let roundPairs: { t1: any; t2: any; round: number }[] = [];
-
-      if (teams.length === 4) {
-        roundPairs.push({ t1: teams[0], t2: teams[1], round: 1 });
-        roundPairs.push({ t1: teams[2], t2: teams[3], round: 1 });
-
-        roundPairs.push({ t1: teams[0], t2: teams[2], round: 2 });
-        roundPairs.push({ t1: teams[1], t2: teams[3], round: 2 });
-
-        roundPairs.push({ t1: teams[0], t2: teams[3], round: 3 });
-        roundPairs.push({ t1: teams[1], t2: teams[2], round: 3 });
-      } else {
-        let rCounter = 1;
-        for (let i = 0; i < teams.length; i++) {
-          for (let j = i + 1; j < teams.length; j++) {
-            roundPairs.push({ t1: teams[i], t2: teams[j], round: rCounter });
-            rCounter = (rCounter % 3) + 1;
-          }
-        }
-      }
+      let roundPairs = generateRoundRobinPairs(teams);
 
       if (targetRound) {
-        roundPairs = roundPairs.filter(p => p.round === targetRound);
+        roundPairs = roundPairs.filter(rp => rp.round === targetRound);
       }
 
       for (const pair of roundPairs) {
-        const team1 = pair.t1;
-        const team2 = pair.t2;
-        const roundNum = pair.round;
+        const { t1: team1, t2: team2, round: roundNum } = pair;
+
+        logger.info(`Creating match (Round ${roundNum}) between team ${team1.id} and ${team2.id} (${format})`);
 
         let channelId: string | undefined = undefined;
 
         if (createDiscordChannels && guild) {
+          const rawName = `r${roundNum}-${team1.tag}-vs-${team2.tag}`;
+          const channelName = sanitizeChannelName(rawName);
+          const categoryName = `⚔️ МАТЧИ — ДЕНЬ ${roundNum}`;
           try {
-            const rawName = `r${roundNum}-${team1.tag}-vs-${team2.tag}`;
-            const channelName = sanitizeChannelName(rawName);
             const { createPrivateMatchChannel } = await import('../utils/privateChannel');
             const channel = await createPrivateMatchChannel(
               guild,
               channelName,
               team1,
               team2,
-              `Round ${roundNum} match for ${grp.name}`
+              `Round ${roundNum} match channel`,
+              categoryName
             );
             channelId = channel.id;
-
-            const { embed, row } = createMatchCardEmbed(
-              'pending',
-              team1.name,
-              team2.name,
-              format,
-              tournament.name,
-              stage.name,
-              grp.name
-            );
-            await channel.send({ embeds: [embed], components: [row] });
-          } catch (chanErr) {
-            logger.warn(`Failed to create channel for ${team1.tag} vs ${team2.tag}:`, chanErr);
+          } catch (err) {
+            logger.error(`Failed creating private channel for ${channelName}:`, err);
           }
         }
 
