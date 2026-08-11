@@ -188,10 +188,11 @@ export class MatchService {
     const createdMatches: any[] = [];
 
     for (const grp of groups) {
-      // Sort teams deterministically by name to ensure stable indices across all round generations
-      const teams = grp.teams
-        .map(gt => gt.team)
-        .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+      // Sort group teams by creation order (gt.createdAt) to preserve the exact published Day 1 matches
+      const sortedGroupTeams = grp.teams.sort(
+        (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      );
+      const teams = sortedGroupTeams.map(gt => gt.team);
 
       if (teams.length < 2) continue;
 
