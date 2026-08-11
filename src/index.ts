@@ -28,11 +28,21 @@ import { handleSelectMatch } from './interactions/selectMenus/selectMatch';
 import { handleSelectWinner } from './interactions/selectMenus/selectWinner';
 
 // HTTP Health Check Server for Render / Cloud hostings
-const port = process.env.PORT || 3000;
-http.createServer((req, res) => {
+const port = process.env.PORT || 8080;
+const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('EFL Discord Bot is online and healthy!\n');
-}).listen(port, () => {
+});
+
+server.on('error', (err: any) => {
+  if (err.code === 'EADDRINUSE') {
+    logger.warn(`Port ${port} in use for health check, skipping HTTP listener.`);
+  } else {
+    logger.error('Health check server error:', err);
+  }
+});
+
+server.listen(port, () => {
   logger.info(`HTTP health check server listening on port ${port}`);
 });
 
